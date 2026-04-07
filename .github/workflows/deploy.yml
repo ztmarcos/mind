@@ -1,0 +1,39 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Build and Deploy
+        run: |
+          sam build
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset
+      
+      - name: Test deployment
+        run: |
+          echo "Testing Lambda function..."
+          aws s3 cp examples/platon2.md "s3://obsidian-wiki-307657261121-obsidian-wiki/raw/test-ci-$(date +%s).md"
+          sleep 30
+          aws s3 ls s3://obsidian-wiki-307657261121-obsidian-wiki/wiki/

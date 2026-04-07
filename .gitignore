@@ -1,0 +1,11 @@
+.env
+.env.local
+awsks
+.aws-sam/
+samconfig.toml
+__pycache__/
+*.pyc
+.python-version
+.venv/
+*.egg-info/
+.DS_Store

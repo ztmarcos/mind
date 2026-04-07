@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Obsidian vault raw/*.md -> Lambda -> Bedrock wiki + optional web search (Secrets Manager).
+
+Parameters:
+  UseBedrock:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Use Bedrock (true) or OpenAI Chat Completions (false) for wiki generation.
+  SearchApiSecretArn:
+    Type: String
+    Default: ''
+    Description: ARN of Secrets Manager secret with openai_api_key. Required.
+  BedrockModelId:
+    Type: String
+    Default: us.anthropic.claude-3-sonnet-20240229-v1:0
+    Description: Bedrock model ID (only if UseBedrock=true).
+  OpenAIModel:
+    Type: String
+    Default: gpt-4o
+    Description: OpenAI model for wiki generation (and optional search if UseBedrock=true).
+  WebsearchEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Global toggle for web search (OpenAI only; ignored if UseBedrock=true).
+  MaxQueries:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 10
+  MaxSnippets:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    MaxValue: 20
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Timeout: 300
+    MemorySize: 1024
+    Tracing: Active
+
+Resources:
+  # Bucket name derived only from account + stack id suffix (no Ref to ContentBucket in Lambda IAM)
+  # avoids circular dependency: Bucket -> Lambda notification -> Function -> Role -> Bucket ARN
+  ContentBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: ProcessorPermissionForS3
+    Properties:
+      BucketName: !Sub 'obsidian-wiki-${AWS::AccountId}-${AWS::StackName}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt ProcessorFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: raw/
+                  - Name: suffix
+                    Value: .md
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+
+  ProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda/
+      Handler: app.handler
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DeadLetterQueue.Arn
+      Environment:
+        Variables:
+          USE_BEDROCK: !Ref UseBedrock
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          OPENAI_MODEL: !Ref OpenAIModel
+          WEBSEARCH_ENABLED: !Ref WebsearchEnabled
+          SEARCH_API_SECRET_ARN: !Ref SearchApiSecretArn
+          MAX_QUERIES: !Ref MaxQueries
+          MAX_SNIPPETS: !Ref MaxSnippets
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: S3ReadRaw
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub 'arn:aws:s3:::obsidian-wiki-${AWS::AccountId}-${AWS::StackName}/raw/*'
+            - Sid: S3WriteWiki
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub 'arn:aws:s3:::obsidian-wiki-${AWS::AccountId}-${AWS::StackName}/wiki/*'
+            - Sid: S3ListWiki
+              Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !Sub 'arn:aws:s3:::obsidian-wiki-${AWS::AccountId}-${AWS::StackName}'
+              Condition:
+                StringLike:
+                  s3:prefix:
+                    - wiki/
+                    - wiki/*
+            - Fn::If:
+                - UseBedrock
+                - Sid: BedrockInvoke
+                  Effect: Allow
+                  Action:
+                    - bedrock:InvokeModel
+                  Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}'
+                - Ref: AWS::NoValue
+            - Sid: SQSDLQ
+              Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt DeadLetterQueue.Arn
+            - Fn::If:
+                - HasSearchSecret
+                - Sid: SecretsRead
+                  Effect: Allow
+                  Action:
+                    - secretsmanager:GetSecretValue
+                  Resource: !Ref SearchApiSecretArn
+                - Ref: AWS::NoValue
+
+  # Explicit S3 notification config (not SAM Events shorthand) to avoid circular dependency
+  ProcessorPermissionForS3:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ProcessorFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::obsidian-wiki-${AWS::AccountId}-${AWS::StackName}'
+
+  # Custom resource or manual step: add notification config to bucket after both exist
+  # For now, we define the bucket notification inline via AWS::S3::Bucket NotificationConfiguration
+  # but reference bucket by logical ID only after Lambda + Permission exist.
+  # Workaround: remove Events from Function and add NotificationConfiguration after stack create.
+  # Cleanest: use a separate bucket resource that DependsOn the permission.
+
+  # Alternative: redefine bucket with NotificationConfiguration that DependsOn permission
+  # We'll do that by removing the Events section and adding NotificationConfiguration on the bucket itself.
+
+Conditions:
+  HasSearchSecret: !Not [!Equals [!Ref SearchApiSecretArn, '']]
+  UseBedrock: !Equals [!Ref UseBedrock, 'true']
+
+Outputs:
+  BucketName:
+    Description: S3 bucket for raw/ and wiki/
+    Value: !Ref ContentBucket
+  ProcessorFunctionArn:
+    Description: Lambda ARN
+    Value: !GetAtt ProcessorFunction.Arn
+  DeadLetterQueueUrl:
+    Description: DLQ URL for failed invocations
+    Value: !Ref DeadLetterQueue
+  SyncInstructions:
+    Description: Set S3_BUCKET to this name for scripts/sync.py
+    Value: !Ref ContentBucket

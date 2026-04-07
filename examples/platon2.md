@@ -1,0 +1,6 @@
+#Platón #filosofía #essay
+
+Mi música y arte está en la luz real, fuera de la cueva, cuando yo lo permito. Es el conocimiento real bien expresado. Cuando estoy preocupado por las sombras, estoy dentro de la cueva. Las sombras las vemos todos. Entonces cuando salgo a la luz, salgo solo y aprendo, y entiendo y sigo creando. Pero en la cueva no me ven. Si yo regreso a explicarles, me pueden odiar, Hay que buscar a los que quieren salir y a los que están afuera. Los que están afuera ya me vieron. Los que quieren salir me están escuchando y también siguen a los que están fuera. 
+Quiero crear un puente para los que no pueden ver la luz. 
+
+En cuanto a la marihuana, me hace ver la luz porque puedo crear cosas más originales o más fuera de lo común. Me hace trabajar duro y me deja terminar lo que me propongo. La cueva es que aveces salto de una cosa a otra sin profundizar tanto. Parece que profundizo pero no del todo. La afectación de la salud es una sombra dentro de la cueva también. Todas las ganas que me quita de hacer otras cosas es la cueva y también el no tener fricción o aburrimiento, frustración. Esa llega por consecuencia de las sombras más que por fricción por salir a la luz.
